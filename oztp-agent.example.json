@@ -1,0 +1,7 @@
+{
+  "server_url": "https://oztp-control-platform-651946913194.us-east1.run.app",
+  "org_api_key": "org_YOUR_KEY_HERE",
+  "device_name": "my-linux-server",
+  "state_file": "/etc/oztp/oztp-agent-state.json",
+  "notes": "linux-server-agent"
+}

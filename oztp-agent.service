@@ -1,0 +1,10 @@
+[Unit]
+Description=OZTP Linux Server Agent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /opt/oztp/oztp_agent_linux.py --config /etc/oztp/oztp-agent.json
+StandardOutput=journal
+StandardError=journal

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run OZTP Linux Server Agent every 15 minutes
+Requires=oztp-agent.service
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+Unit=oztp-agent.service
+
+[Install]
+WantedBy=timers.target
