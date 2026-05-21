@@ -241,6 +241,7 @@ def _check_luks() -> list[dict[str, Any]]:
 
 
 def _check_auto_updates() -> list[dict[str, Any]]:
+    # Debian/Ubuntu — unattended-upgrades
     rc, _, _ = _run(["dpkg", "-s", "unattended-upgrades"])
     if rc == 0:
         active = _systemctl_active("apt-daily-upgrade.timer")
@@ -249,6 +250,19 @@ def _check_auto_updates() -> list[dict[str, Any]]:
         return [{"name": "auto_updates", "result": "pass" if active else "warn",
                  "value": "unattended-upgrades: enabled" if active else "installed but timer not active"}]
 
+    # Pop!_OS — pop-upgrade handles OS and package updates
+    if shutil.which("pop-upgrade"):
+        active = _systemctl_active("pop-upgrade")
+        return [{"name": "auto_updates", "result": "pass" if active else "warn",
+                 "value": "pop-upgrade: active" if active else "pop-upgrade installed but not active"}]
+
+    # Fallback: apt daily timers present on Ubuntu derivatives without unattended-upgrades
+    apt_timer = _systemctl_active("apt-daily-upgrade.timer")
+    if apt_timer is not None:
+        return [{"name": "auto_updates", "result": "pass" if apt_timer else "warn",
+                 "value": "apt-daily-upgrade.timer: active" if apt_timer else "apt timer not active"}]
+
+    # RHEL/Fedora — dnf-automatic
     rc, _, _ = _run(["rpm", "-q", "dnf-automatic"])
     if rc == 0:
         active = _systemctl_active("dnf-automatic.timer")
@@ -423,7 +437,20 @@ def _check_guest_account() -> list[dict[str, Any]]:
 
 
 def _check_password_hash() -> list[dict[str, Any]]:
-    """Flag accounts using weak hashing (MD5 or DES) in /etc/shadow."""
+    """Flag user accounts (UID >= 1000) using weak hashing (MD5 or DES) in /etc/shadow."""
+    # Build UID map so we can skip system service accounts
+    uid_map: dict[str, int] = {}
+    try:
+        for line in Path("/etc/passwd").read_text(errors="replace").splitlines():
+            parts = line.split(":")
+            if len(parts) >= 4:
+                try:
+                    uid_map[parts[0]] = int(parts[2])
+                except ValueError:
+                    pass
+    except OSError:
+        pass
+
     try:
         content = Path("/etc/shadow").read_text(errors="replace")
     except (PermissionError, OSError) as exc:
@@ -437,6 +464,9 @@ def _check_password_hash() -> list[dict[str, Any]]:
             continue
         username, pw_hash = parts[0], parts[1]
         if pw_hash in ("", "!", "!!", "*", "x"):
+            continue
+        # Skip system service accounts (UID < 1000)
+        if uid_map.get(username, 1000) < 1000:
             continue
         # $1$ = MD5, no-$ prefix = DES — both are weak
         if pw_hash.startswith("$1$") or not pw_hash.startswith("$"):
@@ -606,6 +636,9 @@ def _check_lotl() -> list[dict[str, Any]]:
     )
     BASE64_RE = re.compile(r"base64\s+-d|echo\s+[A-Za-z0-9+/=]{30,}\s*\|", re.IGNORECASE)
 
+    # Known-benign cron files that use base64 legitimately (e.g. Chrome update key)
+    BASE64_ALLOWLIST = {"google-chrome", "google-chrome-stable", "google-earth-pro"}
+
     cron_sources: list[Path] = [Path("/etc/crontab")]
     for subdir in ("cron.d", "cron.daily", "cron.weekly", "cron.monthly", "cron.hourly"):
         d = Path("/etc") / subdir
@@ -625,7 +658,7 @@ def _check_lotl() -> list[dict[str, Any]]:
             for line in content.splitlines():
                 if PIPE_SHELL_RE.search(line):
                     pipe_hits.add(cf.name)
-                if BASE64_RE.search(line):
+                if cf.name not in BASE64_ALLOWLIST and BASE64_RE.search(line):
                     base64_hits.add(cf.name)
         except (PermissionError, OSError):
             pass
